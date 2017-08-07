@@ -1,18 +1,14 @@
+#include <cmath>
 #include "MPC.h"
 #include <cppad/cppad.hpp>
 #include <cppad/ipopt/solve.hpp>
 #include "Eigen-3.3/Eigen/Core"
 
+
 using CppAD::AD;
 
-// Good
-//const size_t N  = 25;
-//const double dt = 0.05;
-// Does not move to center, drives of the road
-//const size_t N  = 5;
-//const double dt = 0.25;
-const size_t N  = 25;
-const double dt = 0.05;
+const size_t N  = 5;
+const double dt = 0.3;
 
 
 // The solver takes all the state variables and actuator
@@ -28,13 +24,13 @@ size_t delta_start = epsi_start + N;
 size_t a_start = delta_start + N - 1;
 
 // Scale factors for contributors to the cost function
-const double FACT_CTE   = 1.0;
-const double FACT_EPSI  = 500.0;     // penalize angle error more. Important for driving at high speeds.
-const double FACT_V     = 1.0;
-const double FACT_DELTA = 1.0;
-const double FACT_A     = 0.1;           // penalize accelertion less. Allow breaking
-const double FACT_DELTA_CHANGE = 500.0;  // force smoother curves
-const double FACT_A_CHANGE     = 0.1;
+const double FACT_CTE          = 2.0;
+const double FACT_EPSI         = 1000.0;     // Penalize angle error more than cross track error. This improved Driving at higher speeds.
+const double FACT_V            = 0.1;
+const double FACT_DELTA        = 1.0;
+const double FACT_A            = 0.0;       // Penalize acceleration less. This improved driving at higher speeds by allowing car to apply the breaks.
+const double FACT_DELTA_CHANGE = 100000.0;     // Penalize steering angle changes more. This enforces smoother curves.
+const double FACT_A_CHANGE     = 0.0;       // Penalize acceleration changes less. This improved driving at higher speeds by allowing car to apply the breaks.penalize acceleration less. Allow breaking.
 
 // This value assumes the model presented in the classroom is used.
 //
@@ -74,7 +70,7 @@ class FG_eval {
     // Minimize the use of actuators.
     for (size_t t = 0; t < N - 1; t++) {
       fg[0] += FACT_DELTA * CppAD::pow(vars[delta_start + t], 2);
-      fg[0] += FACT_A     * CppAD::pow(vars[a_start + t], 2);
+      fg[0] += FACT_A     * CppAD::pow(vars[a_start + t], 2); // Acceleration & Breaking
     }
 
     // Minimize the value gap between sequential actuations.
@@ -122,15 +118,17 @@ class FG_eval {
       AD<double> delta0 = vars[delta_start + t - 1];
       AD<double> a0 = vars[a_start + t - 1];
 
-      AD<double> f0 = coeffs_[0] + coeffs_[1]*x0 + coeffs_[2]*x0*x0 + coeffs_[3]*x0*x0*x0;      // 3rd degree polynomial evaluated at x0
-      AD<double> psides0 = CppAD::atan(coeffs_[1] + 2.0*coeffs_[2]*x0 + 3.0*coeffs_[3]*x0*x0); // 3rd degree polynomial derivate evaluated at x0
+      AD<double> xp1 = x0 + v0 * CppAD::cos(psi0) * dt;
+      AD<double> yp1 = coeffs_[0] + coeffs_[1]*xp1 + coeffs_[2]*xp1*xp1 + coeffs_[3]*xp1*xp1*xp1;// 3rd degree polynomial evaluated at predicted value of x1
+      AD<double> epsp1 = CppAD::atan(coeffs_[1] + 2.0*coeffs_[2]*xp1 + 3.0*coeffs_[3]*xp1*xp1); // angle calculated from 3rd degree polynomial derivate evaluated at predicted value of x1
 
-      fg[1 + x_start + t]   = x1 - (x0 + v0 * CppAD::cos(psi0) * dt);
-      fg[1 + y_start + t]   = y1 - (y0 + v0 * CppAD::sin(psi0) * dt);
-      fg[1 + psi_start + t] = psi1 - (psi0 + v0 * delta0 / Lf * dt);
-      fg[1 + v_start + t]   = v1 - (v0 + a0 * dt);
-      fg[1 + cte_start + t] = cte1 - ((f0 - y0) + (v0 * CppAD::sin(epsi0) * dt));
-      fg[1 + epsi_start + t]= epsi1 - ((psi0 - psides0) + v0 * delta0 / Lf * dt);
+      fg[1 + x_start + t]   = x1    - (x0 + v0 * CppAD::cos(psi0) * dt);
+      fg[1 + y_start + t]   = y1    - (y0 + v0 * CppAD::sin(psi0) * dt);
+      fg[1 + psi_start + t] = psi1  - (psi0 + v0 * delta0 / Lf * dt);
+      fg[1 + v_start + t]   = v1    - (v0 + a0 * dt);
+      fg[1 + cte_start + t] = cte1  - (yp1 - (y0 + v0 * CppAD::sin(psi0) * dt));
+      fg[1 + epsi_start + t]= epsi1 - ((psi0 + v0 * delta0 / Lf * dt) - epsp1);
+
     }
   }
 };

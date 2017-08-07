@@ -22,7 +22,7 @@ double mph2mps(double x) { return x * 0.44704; }
 double mps2mph(double x) { return x / 0.44704; }
 
 const double STEER_ANGLE_LIMIT  = deg2rad(25);
-const double REFERENCE_VELOCITY = mph2mps(40); // Target with this reference speed
+const double REFERENCE_VELOCITY = mph2mps(100); // Target with this reference speed
 
 // Checks if the SocketIO event has JSON data.
 // If there is data the JSON object in string format will be returned,
@@ -133,6 +133,42 @@ int main() {
           // Fit a 3rd order polynomial through the waypoints in local car coordinate system
           auto coeffs = polyfit(ptsx_c, ptsy_c, 3);
 
+          // Offset the waypoints to the inside
+          /*
+            y   = f(x) : function fitted to waypoints
+            f'  = df/dx   : first derivative, giving tangential direction.
+            f'' = df'/dx  : second derivative is the change in angle along trajectory.
+            nx,ny         : normal direction. There are two normals, and if there is a curvature, we pick the 'inside' normal
+            R   = (( 1+(f'*f')^(3/2 ) / abs(f'') : Radius of curvature
+          */
+          Eigen::VectorXd ptsx_co(ptsx_c.size());
+          Eigen::VectorXd ptsy_co(ptsx_c.size());
+          const double RMIN = 100.0;
+          for (int i=0; i<ptsx_c.size(); ++i){
+            double x      = ptsx_c[i];
+            double y      = coeffs[0] + coeffs[1]*x + coeffs[2]*x*x + coeffs[3]*x*x*x;
+            double fdot   = coeffs[1] + 2.0*coeffs[2]*x + 3.0*coeffs[3]*x*x;
+            double angle  = atan(fdot);
+            double fddot  = 2.0*coeffs[2] + 6.0*coeffs[3]*x;
+            double R      = pow(1.0+fdot*fdot,1.5) / fabs(fddot);
+            double offset = min(1.75,RMIN/R); // cap offset
+            double nx;
+            double ny;
+            if (fddot>0){
+              nx = -sin(angle);
+              ny =  cos(angle);
+            }
+            else{
+              nx =  sin(angle);
+              ny = -cos(angle);
+            }
+            ptsx_co[i] = x + nx * offset;
+            ptsy_co[i] = y + ny * offset;
+          }
+
+          // Re-fit the 3rd order polynomial through the offsetted waypoints in local car coordinate system
+          auto coeffs_co = polyfit(ptsx_co, ptsy_co, 3);
+
           // Initialize state of the car in local car coodinate system after latency period
           double x_c    = 0.0;
           double y_c    = 0.0;
@@ -144,8 +180,8 @@ int main() {
           Eigen::VectorXd state_c(6);
           state_c << x_c, y_c, psi_c, v_c, cte_c, epsi_c;
 
-          // Solve it
-          mpc.Solve(state_c, coeffs);
+          // Solve it, using offsetted waypoints
+          mpc.Solve(state_c, coeffs_co);
 
           // Send result back to simulator
           json msgJson;
@@ -158,6 +194,7 @@ int main() {
           // Note: Points are in reference to the vehicle's coordinate system
           msgJson["mpc_x"] = mpc.get_x_vals();
           msgJson["mpc_y"] = mpc.get_y_vals();
+
 
           // To display the waypoints by a yellow line
           // Note: Points are in reference to the vehicle's coordinate system
