@@ -22,7 +22,7 @@ double mph2mps(double x) { return x * 0.44704; }
 double mps2mph(double x) { return x / 0.44704; }
 
 const double STEER_ANGLE_LIMIT  = deg2rad(25);
-const double REFERENCE_VELOCITY = mph2mps(50); // Target with this reference speed
+const double REFERENCE_VELOCITY = mph2mps(40); // Target with this reference speed
 
 // Checks if the SocketIO event has JSON data.
 // If there is data the JSON object in string format will be returned,
@@ -110,18 +110,15 @@ int main() {
           // Calculate position & orientation of car at end of latency period
           // We need to be accurate at high speeds, so integrate it over the latency period
           // With constant acceleration and steering angle.
-          const int iters_lat = 50;
-          const double dt_lat = latency/iters_lat;
+
           double px_lat = px;  // global car x-location  after latency period
           double py_lat = py;  // global car y-location  after latency period
           double psi_lat= psi;  // global car orientation after latency period
           double v_lat  = v;
-          for (int i=0; i<iters_lat; ++i){
-            px_lat += v_lat*cos(psi_lat)*dt_lat;
-            py_lat += v_lat*sin(psi_lat)*dt_lat;
-            psi_lat-= v_lat*delta*dt_lat/Lf;
-            v_lat  += a*dt_lat;
-          }
+          px_lat += v_lat*cos(psi_lat)*latency;
+          py_lat += v_lat*sin(psi_lat)*latency;
+          psi_lat-= v_lat*delta*latency/Lf;
+          v_lat  += a*latency;
 
           // Convert waypoint coordinates into local car coordinate system after latency period
           Eigen::VectorXd ptsx_c(ptsx.size());
@@ -140,7 +137,7 @@ int main() {
           double x_c    = 0.0;
           double y_c    = 0.0;
           double psi_c  = 0.0;
-          double v_c    = v + a*latency;
+          double v_c    = v_lat;
           double cte_c  = coeffs[0];
           double epsi_c = -atan(coeffs[1]);
 

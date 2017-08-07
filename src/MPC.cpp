@@ -5,9 +5,15 @@
 
 using CppAD::AD;
 
-// works without latency and speed=25 mph
+// Good
+//const size_t N  = 25;
+//const double dt = 0.05;
+// Does not move to center, drives of the road
+//const size_t N  = 5;
+//const double dt = 0.25;
 const size_t N  = 25;
 const double dt = 0.05;
+
 
 // The solver takes all the state variables and actuator
 // variables in a singular vector. Thus, we should to establish
