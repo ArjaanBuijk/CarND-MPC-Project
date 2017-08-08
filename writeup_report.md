@@ -120,10 +120,24 @@ To deal with the latency of 100 msec, the vehicle location after the latency per
 
 - The offsetted waypoints are again curve fitted with a 3rd order poynomial.
 
+This image shows the offsetted waypoints in green, with the orignal waypoints in yellow:
+
+![track1](https://github.com/ArjaanBuijk/CarND-MPC-Project/blob/master/Images/Offset_Waypoints.jpg?raw=true)
+
+### Reference speed & Top speed reached
+The highest reference speed with which the car safely drives around the track is <b>110 mph</b>.
+
+The top speed reached is <b>105.18 mph</b>, reached early during the 2nd time around the track:
+![track1](https://github.com/ArjaanBuijk/CarND-MPC-Project/blob/master/Images/Top_Speed.jpg?raw=true)
+
+
+
+
+
 # 3. Summary
 
 The result can be summarized as follows:
 
 - The MPC controller is very good in driving the car smoothly around the track.
 - To avoid weaving, it is important to  keep the orientation of the car very closely aligned with the waypoint trajectory, by applying a very high penalty in the cost function for delta and change in delta. This was one of the key findings allowing the car to drive at higher speeds.
-- To allow driving at very high speeds, up to 100 mph, even with latency in the system, it helps to offset the trajectory to the inside of curves.
+- To allow driving at very high speeds, over 100 mph, even with latency in the system, it helps to offset the trajectory to the inside of curves, and to take acceleration out of the cost function.

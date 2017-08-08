@@ -22,7 +22,7 @@ double mph2mps(double x) { return x * 0.44704; }
 double mps2mph(double x) { return x / 0.44704; }
 
 const double STEER_ANGLE_LIMIT  = deg2rad(25);
-const double REFERENCE_VELOCITY = mph2mps(100); // Target with this reference speed
+const double REFERENCE_VELOCITY = mph2mps(110); // Target with this reference speed
 
 // Checks if the SocketIO event has JSON data.
 // If there is data the JSON object in string format will be returned,
@@ -141,11 +141,18 @@ int main() {
             nx,ny         : normal direction. There are two normals, and if there is a curvature, we pick the 'inside' normal
             R   = (( 1+(f'*f')^(3/2 ) / abs(f'') : Radius of curvature
           */
-          Eigen::VectorXd ptsx_co(ptsx_c.size());
-          Eigen::VectorXd ptsy_co(ptsx_c.size());
+          vector<double> offset_x_vals;
+          vector<double> offset_y_vals;
           const double RMIN = 100.0;
-          for (int i=0; i<ptsx_c.size(); ++i){
-            double x      = ptsx_c[i];
+          for (int i=-1; i<ptsx_c.size(); ++i){
+            double x;
+            if (i==-1)
+              x= 0.0;  // Always put a waypoint at x=0.0
+            else
+              x= ptsx_c[i];
+            // skip this waypoint if it is behind the car
+            if (x<0.0)
+              continue;
             double y      = coeffs[0] + coeffs[1]*x + coeffs[2]*x*x + coeffs[3]*x*x*x;
             double fdot   = coeffs[1] + 2.0*coeffs[2]*x + 3.0*coeffs[3]*x*x;
             double angle  = atan(fdot);
@@ -162,8 +169,16 @@ int main() {
               nx =  sin(angle);
               ny = -cos(angle);
             }
-            ptsx_co[i] = x + nx * offset;
-            ptsy_co[i] = y + ny * offset;
+            double x_offset = x + nx * offset;
+            double y_offset = y + ny * offset;
+            offset_x_vals.push_back( x_offset );
+            offset_y_vals.push_back( y_offset );
+          }
+          Eigen::VectorXd ptsx_co(offset_x_vals.size());
+          Eigen::VectorXd ptsy_co(offset_x_vals.size());
+          for (size_t i=0; i<offset_x_vals.size(); ++i){
+            ptsx_co[i] = offset_x_vals[i];
+            ptsy_co[i] = offset_y_vals[i];
           }
 
           // Re-fit the 3rd order polynomial through the offsetted waypoints in local car coordinate system
@@ -194,6 +209,9 @@ int main() {
           // Note: Points are in reference to the vehicle's coordinate system
           msgJson["mpc_x"] = mpc.get_x_vals();
           msgJson["mpc_y"] = mpc.get_y_vals();
+          // Use these if you want to see the offsetted waypoints...
+          //msgJson["mpc_x"] = offset_x_vals;
+          //msgJson["mpc_y"] = offset_y_vals;
 
 
           // To display the waypoints by a yellow line
