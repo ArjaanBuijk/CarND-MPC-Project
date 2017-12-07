@@ -16,7 +16,7 @@ The goals / steps of this project are the following:
 My project includes the following files:
 
 - [<b>C++</b> - The source code](https://github.com/ArjaanBuijk/CarND-MPC-Project/tree/master/src)
-- [<b>writeup_report.md</b> - A summary of the project](https://github.com/ArjaanBuijk/CarND-MPC-Project/blob/master/writeup_report.md)
+- [<b>README.md</b> - A summary of the project](https://github.com/ArjaanBuijk/CarND-MPC-Project/blob/master/README.md)
 - [<b>video_MPC.mp4</b> - Video showing the car driving on the track using the MPC controller](https://github.com/ArjaanBuijk/CarND-MPC-Project/blob/master/Videos/video_MPC.mp4)
 
     ![track1](https://github.com/ArjaanBuijk/CarND-MPC-Project/blob/master/Videos/video_MPC.gif?raw=true)
