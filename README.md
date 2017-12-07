@@ -1,5 +1,146 @@
-# CarND-Controls-MPC
-Self-Driving Car Engineer Nanodegree Program
+# Model Predictive Control Project
+---
+
+The goals / steps of this project are the following:
+
+* Implement a Model Predictive Control (MPC) controller in C++, for steering angle and throttle.
+* Test implementation by driving a car simulator around a track.
+
+---
+
+## 1. Files
+
+My project includes the following files:
+
+- [<b>C++</b> - The source code](https://github.com/ArjaanBuijk/CarND-MPC-Project/tree/master/src)
+- [<b>writeup_report.md</b> - A summary of the project](https://github.com/ArjaanBuijk/CarND-MPC-Project/blob/master/writeup_report.md)
+- [<b>video_MPC.mp4</b> - Video showing the car driving on the track using the MPC controller](https://github.com/ArjaanBuijk/CarND-MPC-Project/blob/master/Videos/video_MPC.mp4)
+
+    ![track1](https://github.com/ArjaanBuijk/CarND-MPC-Project/blob/master/Videos/video_MPC.gif?raw=true)
+
+
+---
+## 2. Implementation
+
+### The Model
+In our Model Predictive Control implementation, we predict the future state of the car by using a kinematic model. Dynamic effects, like tire forces & inertia are ignored.
+
+Each time-step, the MPC will be provided with a target trajectory to follow, and will be asked for the best control inputs to apply (steering & acceleration). In order to allow the MPC to calculate these control inputs, we include in our model two error measures that reflect the difference between the target trajectory and the predicted trajectory by our kinematic model. The two error measures are added as state Variables, resulting in:
+
+<b>State Variables with error measures</b>
+ - x	= x location of car center
+ - y	= y location of car center
+ - psi	= orientation angle of car
+ - v	= velocity of car
+ - cte = cross track error
+ - epsi = orientation error
+
+<b>Control Inputs (actuators)</b>
+ - delta= steering angle
+ - a	= acceleration (positive represents throttle, negative represents brake)
+
+The equations that update the state variables from time t to time t+1 are given by:
+
+    x(t+1) = x(t) + v(t)*cos(psi(t)) * dt
+    y(t+1) = y(t) + v(t)*sin(psi(t)) * dt
+    psi(t+1) = psi(t) + v(t)*delta(t) * dt / Lf
+    v(t+1) = v(t) + a(t) * dt
+    cte(t+1) = f(x(t+1)) - y(t+1)
+    epsi(t+1) = psi(t+1) - atan(f'(x(t+1)))
+
+Where:
+ - All calculations are performed in the car coordinate system.
+ - Lf is a characteristic of the car we are controlling. It represents the distance between the front wheels and its center of gravity. The simulator models a car with Lf=2.67 m.
+ - f(x(t+1)) is the provided trajectories' y-location at time t+1
+ - atan(f'(x(t+1))) is the angle of the provided trajectory at time t+1
+
+These equations are implemented in the class FG_eval, as model constraints on an optimization problem. 
+
+<b>The optimization problem</b>
+
+To find the best actuation values (delta, a), we ask the optimizer to minimize this 'cost' function:
+
+    cost = FACT_CTE             * SUM(cte*cte) +
+           FACT_EPSI            * SUM(epsi*epsi) +
+           FACT_V               * SUM(v*v) +
+           FACT_DELTA           * SUM(delta*delta) +
+           FACT_A               * SUM(a*a) +
+           FACT_DELTA_CHANGE    * SUM(ddelta*ddelta) +
+           FACT_A_CHANGE        * SUM(da*da)
+
+The values for the hyperparameters were optimized by trial & error:
+
+|Parameter|Value|Comment|
+|-|-|-|
+|FACT_CTE         |2.0| |
+|FACT_EPSI        |1000.0| Penalize angle error more than cross track error. This improved Driving at higher speeds. |
+|FACT_V           |0.1| |
+|FACT_DELTA       |1.0| |
+|FACT_A           |0.0| Do not penalize accelerating or braking. This improved driving at higher speeds by allowing car to apply the brakes.|
+|FACT_DELTA_CHANGE|500.0| Penalize steering angle changes more. This enforces smoother curves.|
+|FACT_A_CHANGE    |0.0| Do not penalize accelerating or braking. This improved driving at higher speeds by allowing car to apply the brakes|
+
+
+### Timestepping (N & dt)
+The optimizer will minimize the cost function for a certain predicted time horizon into the future. This is done by iterating over the kinematic model for a number of steps (N), with a fixed time-step (dt). The values for N and dt must be chosen carefully, taking the following into consideration:
+- N*dt should be only a few seconds. The environment will change enough that it does not make sense to predict too far into the future.
+- dt should be small, to avoid discretization errors.
+- N should be small, to minimize computational cost.
+
+
+The values for N & dt were optimized by trial & error:
+
+|Parameter| Value|
+|-|-|
+|N|5|
+|dt|0.3|
+
+Besides these chosen values, many combinations were tried, for example (10,0.3), (10,0.1), (25,0.2), etc. The outcome was that the best choice depends on the target speed. It is best to use values for N and dt that give a time horizon that extends 2-3 waypoints forward.
+
+### Polynomial Fitting, MPC Preprocessing and MPC with latency
+To deal with the latency of 100 msec, the vehicle location after the latency period is first predicted using the kinematic model equations. That location is then used as the basis for the vehicle coordinate system in which all the rest of the calculations are performed. In detail, these are the steps used:
+
+- The waypoints coordinates are transformed into the vehicle coordinate system.
+- The waypoints in the local system are curve fitted with a 3rd order polynomial.
+- The waypoints are offset into the direction of radius of curvature:
+    ![track1](https://github.com/ArjaanBuijk/CarND-MPC-Project/blob/master/Images/radius_of_curvature.jpg?raw=true)
+    - This makes the car take inside curves.
+    - The offset is calculated as:
+        - y   = f(x) : function fitted to waypoints
+        - f'  = df/dx   : first derivative, giving tangential direction.
+        - f'' = df'/dx  : second derivative is the change in angle along trajectory.
+        - nx,ny         : normal direction. There are two normals. Pick the 'inside' normal.
+        - R   = (( 1+(f'*f')^(3/2 ) / abs(f'') : Radius of curvature
+        - offset = min(1.75, RMIN/R) 
+        - RMIN = 100m
+        - RMIN/R is the amount of offset:
+        - = 0 for a straight line
+        - = Higher for tighter curves
+        - = Capped at 1.75m
+
+- The offsetted waypoints are again curve fitted with a 3rd order poynomial and provided to the MPC as the target trajectory to follow.
+
+This image shows the offsetted waypoints in green, with the orignal waypoints in yellow:
+
+![track1](https://github.com/ArjaanBuijk/CarND-MPC-Project/blob/master/Images/Offset_Waypoints.jpg?raw=true)
+
+### Reference speed & Top speed reached
+The highest reference speed with which the car safely drives around the track is <b>110 mph</b>.
+
+The top speed reached is <b>105.18 mph</b>, reached early during the 2nd time around the track:
+![track1](https://github.com/ArjaanBuijk/CarND-MPC-Project/blob/master/Images/Top_Speed.jpg?raw=true)
+
+
+
+
+
+# 3. Summary
+
+The result can be summarized as follows:
+
+- The MPC controller is very good in driving the car smoothly around the track.
+- To avoid weaving, it is important to  keep the orientation of the car very closely aligned with the waypoint trajectory. This is achieved by applying a very high penalty in the cost function for delta and change in delta. This was one of the key findings allowing the car to drive at higher speeds.
+- Furthermore, to allow driving at very high speeds, over 100 mph, even with latency in the system, it helps to offset the trajectory to the inside of curves, and to take acceleration completely out of the cost function.
 
 ---
 
@@ -55,72 +196,7 @@ Self-Driving Car Engineer Nanodegree Program
 
 ## Basic Build Instructions
 
-
 1. Clone this repo.
 2. Make a build directory: `mkdir build && cd build`
 3. Compile: `cmake .. && make`
 4. Run it: `./mpc`.
-
-## Tips
-
-1. It's recommended to test the MPC on basic examples to see if your implementation behaves as desired. One possible example
-is the vehicle starting offset of a straight line (reference). If the MPC implementation is correct, after some number of timesteps
-(not too many) it should find and track the reference line.
-2. The `lake_track_waypoints.csv` file has the waypoints of the lake track. You could use this to fit polynomials and points and see of how well your model tracks curve. NOTE: This file might be not completely in sync with the simulator so your solution should NOT depend on it.
-3. For visualization this C++ [matplotlib wrapper](https://github.com/lava/matplotlib-cpp) could be helpful.
-
-## Editor Settings
-
-We've purposefully kept editor configuration files out of this repo in order to
-keep it as simple and environment agnostic as possible. However, we recommend
-using the following settings:
-
-* indent using spaces
-* set tab width to 2 spaces (keeps the matrices in source code aligned)
-
-## Code Style
-
-Please (do your best to) stick to [Google's C++ style guide](https://google.github.io/styleguide/cppguide.html).
-
-## Project Instructions and Rubric
-
-Note: regardless of the changes you make, your project must be buildable using
-cmake and make!
-
-More information is only accessible by people who are already enrolled in Term 2
-of CarND. If you are enrolled, see [the project page](https://classroom.udacity.com/nanodegrees/nd013/parts/40f38239-66b6-46ec-ae68-03afd8a601c8/modules/f1820894-8322-4bb3-81aa-b26b3c6dcbaf/lessons/b1ff3be0-c904-438e-aad3-2b5379f0e0c3/concepts/1a2255a0-e23c-44cf-8d41-39b8a3c8264a)
-for instructions and the project rubric.
-
-## Hints!
-
-* You don't have to follow this directory structure, but if you do, your work
-  will span all of the .cpp files here. Keep an eye out for TODOs.
-
-## Call for IDE Profiles Pull Requests
-
-Help your fellow students!
-
-We decided to create Makefiles with cmake to keep this project as platform
-agnostic as possible. Similarly, we omitted IDE profiles in order to we ensure
-that students don't feel pressured to use one IDE or another.
-
-However! I'd love to help people get up and running with their IDEs of choice.
-If you've created a profile for an IDE that you think other students would
-appreciate, we'd love to have you add the requisite profile files and
-instructions to ide_profiles/. For example if you wanted to add a VS Code
-profile, you'd add:
-
-* /ide_profiles/vscode/.vscode
-* /ide_profiles/vscode/README.md
-
-The README should explain what the profile does, how to take advantage of it,
-and how to install it.
-
-Frankly, I've never been involved in a project with multiple IDE profiles
-before. I believe the best way to handle this would be to keep them out of the
-repo root to avoid clutter. My expectation is that most profiles will include
-instructions to copy files to a new location to get picked up by the IDE, but
-that's just a guess.
-
-One last note here: regardless of the IDE used, every submitted project must
-still be compilable with cmake and make./
